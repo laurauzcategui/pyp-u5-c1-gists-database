@@ -3,14 +3,18 @@ import sqlite3
 
 
 class SearchExplore(object):
-    def __init__(self, db_connection):
+    ''' base class to start to be called from search and build_query '''
+    def __init__(self, db_connection, query=None):
         self.db_connection = db_connection
+        self.query = query
 
     def all(self):
-        return GistsIterator(self.db_connection)
+    ''' it will return a search of all gists across the table '''
+        return GistsIterator(self.db_connection,self.query)
 
     def search(self, id=None, github_id=None, html_url=None, git_pull_url=None, git_push_url=None, commits_url=None, forks_url=None, public=None, created_at=None, updated_at=None, comments=None, comments_url=None):
-        params = {'id'          : None,
+    ''' it will lookup only for the terms we are querying. '''
+        params = {'id'           : None,
                   'github_id'    : None,
                   'html_url'     : None,
                   'git_pull_url' : None,
@@ -18,35 +22,37 @@ class SearchExplore(object):
                   'commits_url'  : None,
                   'forks_url'    : None,
                   'public'       : None,
-                  'created_at'   :None,
+                  'created_at'   : None,
                   'updated_at'   : None,
                   'comments'     : None,
                   'comments_url' : None }
         if not any(params.values()):
             raise ValueError
-        return SearchGistIterator(**params)
+        return SearchGistIterator(self.db_connection, **params)
 
 class GistsIterator(object):
-    def __init__(self,db_connection):
+    def __init__(self,db_connection, conditions=None):
+        ''' it will initialize the gist iterator object '''
+        query_all = "select * from gists"
         self.gists = []
         self.idx = 0
         self.db_connection = db_connection
+        self.query = query_all if conditions is None else '{} where {}'.format(query_all, conditions)
 
     def __iter__(self):
+        ''' it will initialize the iterator and will query based on self.query '''
         self.gists = []
         self.idx = 0
         self.select_gists()
         return self
 
     def select_gists(self):
-        conn = sqlite3.connect(self.db_connection)
-        cur = conn.cursor()
-        cur.execute("select * from gists")
+        cur = self.db_connection.cursor()
+        cur.execute(self.query)
         for row in cur:
             new_gist = Gist(row)
             self.gists.append(new_gist)
-        conn.close()
-        
+
     def __next__(self):
         if self.idx + 1 > len(self.gists):
             raise StopIteration
@@ -54,7 +60,7 @@ class GistsIterator(object):
         self.idx += 1
         return gist
 
-    next = __next__        
+    next = __next__
 
 class SearchGistIterator(GistsIterator):
     def __init__(self, db_connection, id=None, github_id=None, html_url=None, git_pull_url=None, git_push_url=None, commits_url=None, forks_url=None, public=None, created_at=None, updated_at=None, comments=None, comments_url=None):
@@ -78,18 +84,36 @@ class SearchGistIterator(GistsIterator):
             if value and getattr(gist, key) != value:
                 return False
         return True
-    
+
     def __next__(self):
-        gist = super(SearchIterator, self).__next__()
+        gist = super(SearchGistIterator, self).__next__()
         if self.search_by_terms(gist):
             return gist
         return next(self)
-    
+
         next = __next__
 
 
 def search_gists(db_connection, **kwargs):
-    pass
+    search_explorer = SearchExplore(db_connection)
+    if len(kwargs) > 0:
+        build_query(**kwargs)
+        return search_explorer.search(**kwargs)
+    else:
+        return search_explorer.all()
 
-def build_query():
-    pass
+def build_query(**kwargs):
+    conditions = []
+    key_condition = []
+    comparisons = { 'gt'  : '>',
+                    'gte' : '>=',
+                    'lt'  : '<',
+                    'lte' : '=<'}
+    for condition in kwargs:
+        key_condition = condition.split('__')
+        new_kargs = []
+        if len(key_condition) > 0:
+            conditions.append('{} {} :{}'.format(key_condition[0],condition[key_condition[1]],key_condition[0]))
+        else:
+            pass
+    return ' and '.join(conditions)
